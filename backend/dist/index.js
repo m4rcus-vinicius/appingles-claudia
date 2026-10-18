@@ -189,6 +189,13 @@ const startServer = async () => {
         await fastify.listen({ port: config_js_1.CONFIG.port, host: config_js_1.CONFIG.host });
         console.log(`\n🚀 Servidor Gateway AppIngles rodando em http://${config_js_1.CONFIG.host}:${config_js_1.CONFIG.port}`);
         console.log(`🎙️  WebSocket Live Audio Endpoint: ws://localhost:${config_js_1.CONFIG.port}/ws/tutor\n`);
+        // Keep-alive automático na nuvem (Render Free Tier) a cada 10 minutos para evitar hibernação
+        const externalUrl = process.env.RENDER_EXTERNAL_URL || 'https://claudia-ingles-backend.onrender.com';
+        setInterval(() => {
+            fetch(`${externalUrl}/health`).catch(() => {
+                // ignore ping errors
+            });
+        }, 10 * 60 * 1000);
     }
     catch (err) {
         fastify.log.error(err);

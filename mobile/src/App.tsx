@@ -44,9 +44,9 @@ export default function App() {
     INITIAL_DEMO_CORRECTIONS
   );
   const [settingsVisible, setSettingsVisible] = useState<boolean>(false);
-  // Configurado por padrão com o IP local do seu PC na rede (192.168.100.19) para funcionar direto no celular
+  // Configurado por padrão com o servidor na nuvem (Render) para funcionar 24h com o PC desligado
   const [backendWsUrl, setBackendWsUrl] = useState<string>(
-    'ws://192.168.100.19:3001/ws/tutor'
+    'wss://claudia-ingles-backend.onrender.com/ws/tutor'
   );
   const [lastBargeInTime, setLastBargeInTime] = useState<string | null>(null);
 
@@ -267,12 +267,12 @@ export default function App() {
               onChangeText={setBackendWsUrl}
               autoCapitalize="none"
               autoCorrect={false}
-              placeholder="ws://192.168.100.19:3001/ws/tutor"
+              placeholder="wss://claudia-ingles-backend.onrender.com/ws/tutor"
               placeholderTextColor="#64748B"
             />
             <Text style={styles.inputHelper}>
-              • Celular na mesma rede Wi-Fi: ws://192.168.100.19:3001/ws/tutor{'\n'}
-              • Emulador Android: ws://10.0.2.2:3001/ws/tutor
+              • Nuvem 24h (Padrão): wss://claudia-ingles-backend.onrender.com/ws/tutor{'\n'}
+              • Wi-Fi Local (PC): ws://192.168.100.19:3001/ws/tutor
             </Text>
 
             <IntensitySelector
