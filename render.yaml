@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: claudia-ingles-backend
+    runtime: node
+    plan: free
+    rootDir: backend
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_LIVE_MODEL
+        value: models/gemini-2.5-flash-native-audio-latest
+      - key: GEMINI_VOICE_NAME
+        value: Aoede
+      - key: PORT
+        value: 3001

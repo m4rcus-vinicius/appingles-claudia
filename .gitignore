@@ -1,0 +1,11 @@
+node_modules/
+**/node_modules/
+.env
+backend/.env
+*.log
+backend/*.log
+mobile/*.log
+backend/cloudflared.exe
+mobile/.expo/
+mobile/android/
+*.apk
