@@ -12,6 +12,7 @@ const SILENT_100MS_PCM_16K_BASE64 = Buffer.alloc(3200, 0).toString('base64');
 /**
  * Gerencia uma sessão WebSocket bidirecional com a Gemini Multimodal Live API
  * (BidiGenerateContent):
+ * - Distribui automaticamente múltiplos usuários simultâneos entre o pool de chaves GEMINI_API_KEY.
  * - Consolida os pacotes de áudio de cada fala da Cláudia em um único bloco contínuo
  *   para garantir que frases longas NUNCA sejam cortadas na metade no celular.
  * - Bloqueia eco acústico no servidor durante a geração e reprodução da fala da Cláudia,
@@ -24,6 +25,7 @@ class GeminiLiveSession {
     hasSentInitialGreeting = false;
     intensity;
     callbacks;
+    sessionApiKey = '';
     // Buffer de consolidação de áudio do turno atual da Cláudia
     currentTurnPcmBuffers = [];
     isGeneratingModelTurn = false;
@@ -35,13 +37,20 @@ class GeminiLiveSession {
         this.intensity = intensity;
         this.callbacks = callbacks;
     }
-    connect() {
-        if (!config_js_1.CONFIG.geminiApiKey || config_js_1.CONFIG.geminiApiKey === 'coloque_sua_chave_aqui') {
+    connect(rotateKey = false) {
+        if (!this.sessionApiKey) {
+            this.sessionApiKey = (0, config_js_1.acquireLeastLoadedApiKey)();
+        }
+        else if (rotateKey) {
+            (0, config_js_1.releaseApiKey)(this.sessionApiKey);
+            this.sessionApiKey = (0, config_js_1.getNextFallbackApiKey)(this.sessionApiKey);
+        }
+        if (!this.sessionApiKey) {
             this.callbacks.onError('GEMINI_API_KEY não configurada no servidor backend (.env). Configure sua chave do Google AI Studio.');
             return;
         }
         this.isClosedByClient = false;
-        const url = `${config_js_1.CONFIG.geminiWsEndpoint}?key=${encodeURIComponent(config_js_1.CONFIG.geminiApiKey)}`;
+        const url = `${config_js_1.CONFIG.geminiWsEndpoint}?key=${encodeURIComponent(this.sessionApiKey)}`;
         this.geminiWs = new ws_1.default(url);
         this.geminiWs.on('open', () => {
             this.sendSetupMessage();
@@ -59,10 +68,10 @@ class GeminiLiveSession {
             this.currentTurnPcmBuffers = [];
             this.isGeneratingModelTurn = false;
             if (!this.isClosedByClient) {
-                console.log('[GeminiLiveSession] Reconectando automaticamente ao Gemini Live em 600ms...');
+                console.log('[GeminiLiveSession] Reconectando automaticamente ao Gemini Live em 600ms (rotacionando chave se houver pool)...');
                 setTimeout(() => {
                     if (!this.isClosedByClient) {
-                        this.connect();
+                        this.connect(true);
                     }
                 }, 600);
                 return;
@@ -274,9 +283,11 @@ class GeminiLiveSession {
      */
     async extractCorrectionIfAny(userSaid, tutorSaid) {
         try {
-            let parsed = await this.extractViaLiveWs(userSaid, tutorSaid);
+            // Usa primeiro o pool de 8 modelos REST (0 consumo de WebSockets simultâneos e ~0.9s de resposta);
+            // se a cota diária REST de todas as chaves acabar, usa o extrator Live WebSocket ilimitado!
+            let parsed = await this.extractViaRestPool(userSaid, tutorSaid);
             if (!parsed) {
-                parsed = await this.extractViaRestPool(userSaid, tutorSaid);
+                parsed = await this.extractViaLiveWs(userSaid, tutorSaid);
             }
             if (parsed?.hasCorrection && (parsed.correction || parsed.explanationPt)) {
                 const validCategories = ['grammar', 'vocabulary', 'pronunciation', 'naturalness'];
@@ -299,11 +310,12 @@ class GeminiLiveSession {
         }
     }
     /**
-     * Extrator primário via Gemini Multimodal Live WebSocket (sem limite de 20 req/dia no Free Tier)
+     * Extrator via Gemini Multimodal Live WebSocket (sem limite de 20 req/dia no Free Tier)
      */
     extractViaLiveWs(userSaid, tutorSaid) {
         return new Promise((resolve) => {
-            const url = `${config_js_1.CONFIG.geminiWsEndpoint}?key=${encodeURIComponent(config_js_1.CONFIG.geminiApiKey)}`;
+            const extractorKey = (0, config_js_1.getNextFallbackApiKey)(this.sessionApiKey) || this.sessionApiKey || config_js_1.CONFIG.geminiApiKey;
+            const url = `${config_js_1.CONFIG.geminiWsEndpoint}?key=${encodeURIComponent(extractorKey)}`;
             const ws = new ws_1.default(url);
             let resolved = false;
             const finish = (result) => {
@@ -422,7 +434,8 @@ class GeminiLiveSession {
         });
     }
     /**
-     * Pool secundário de fallback REST (rotaciona entre 8 modelos Flash independentes caso necessário)
+     * Pool de 8 modelos Flash REST combinado com todas as chaves configuradas no pool
+     * (zero conexões WebSocket extras, garantindo máxima capacidade para múltiplos usuários simultâneos)
      */
     async extractViaRestPool(userSaid, tutorSaid) {
         const fallbackModels = [
@@ -438,41 +451,45 @@ class GeminiLiveSession {
         const promptText = `Analise a fala abaixo da tutora de inglês Cláudia (que conversa em inglês, mas muda para o português quando o aluno comete algum erro).
 ${userSaid ? `Transcrição do aluno: "${userSaid}"\n` : ''}Transcrição da resposta da Cláudia: "${tutorSaid}"
 
-Verifique se nessa fala a Cláudia corrigiu algum erro gramatical, vocabulário, tradução literal, pronúncia ou deu bronca em português ensinando como falar em inglês.
+Verifique se nessa fala a Cláudia corrigiu algum erro gramatical, vocabulário, tradução literal, pronúncia ou deu bronca em português ensinando como falar em inglês. (Se ela apenas comemorou que o aluno repetiu certo, marque hasCorrection: false).
 Retorne APENAS um objeto JSON válido com: hasCorrection (boolean), userSaid (string), correction (string), explanationPt (string), category ("grammar" | "vocabulary" | "pronunciation" | "naturalness").`;
-        for (const modelCfg of fallbackModels) {
-            try {
-                const generationConfig = {
-                    responseMimeType: 'application/json',
-                    temperature: 0.1,
-                };
-                if (modelCfg.disableThinking) {
-                    generationConfig.thinkingConfig = { thinkingBudget: 0 };
+        const allKeys = (0, config_js_1.getAllApiKeys)();
+        const keysToTry = allKeys.length > 0 ? allKeys : [config_js_1.CONFIG.geminiApiKey];
+        for (const apiKey of keysToTry) {
+            for (const modelCfg of fallbackModels) {
+                try {
+                    const generationConfig = {
+                        responseMimeType: 'application/json',
+                        temperature: 0.1,
+                    };
+                    if (modelCfg.disableThinking) {
+                        generationConfig.thinkingConfig = { thinkingBudget: 0 };
+                    }
+                    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelCfg.name}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            safetySettings: tutorPersona_js_1.UNFILTERED_SAFETY_SETTINGS,
+                            contents: [{ role: 'user', parts: [{ text: promptText }] }],
+                            generationConfig,
+                        }),
+                    });
+                    if (!res.ok)
+                        continue;
+                    const data = (await res.json());
+                    const parts = data?.candidates?.[0]?.content?.parts || [];
+                    const textPart = parts.find((p) => p.text && !p.thought) || parts[0];
+                    if (!textPart?.text)
+                        continue;
+                    const cleaned = String(textPart.text)
+                        .replace(/^```json\s*/i, '')
+                        .replace(/```\s*$/i, '')
+                        .trim();
+                    return JSON.parse(cleaned);
                 }
-                const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelCfg.name}:generateContent?key=${encodeURIComponent(config_js_1.CONFIG.geminiApiKey)}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        safetySettings: tutorPersona_js_1.UNFILTERED_SAFETY_SETTINGS,
-                        contents: [{ role: 'user', parts: [{ text: promptText }] }],
-                        generationConfig,
-                    }),
-                });
-                if (!res.ok)
+                catch {
                     continue;
-                const data = (await res.json());
-                const parts = data?.candidates?.[0]?.content?.parts || [];
-                const textPart = parts.find((p) => p.text && !p.thought) || parts[0];
-                if (!textPart?.text)
-                    continue;
-                const cleaned = String(textPart.text)
-                    .replace(/^```json\s*/i, '')
-                    .replace(/```\s*$/i, '')
-                    .trim();
-                return JSON.parse(cleaned);
-            }
-            catch {
-                continue;
+                }
             }
         }
         return null;
@@ -484,6 +501,10 @@ Retorne APENAS um objeto JSON válido com: hasCorrection (boolean), userSaid (st
     }
     close() {
         this.isClosedByClient = true;
+        if (this.sessionApiKey) {
+            (0, config_js_1.releaseApiKey)(this.sessionApiKey);
+            this.sessionApiKey = '';
+        }
         if (this.geminiWs) {
             this.geminiWs.removeAllListeners();
             if (this.geminiWs.readyState === ws_1.default.OPEN) {

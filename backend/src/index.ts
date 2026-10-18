@@ -4,7 +4,7 @@ import websocket from '@fastify/websocket';
 import fs from 'fs';
 import path from 'path';
 import type WebSocket from 'ws';
-import { CONFIG } from './config.js';
+import { CONFIG, getAllApiKeys } from './config.js';
 import { GeminiLiveSession } from './services/geminiLiveSession.js';
 import type { HumorIntensity } from './prompts/tutorPersona.js';
 
@@ -14,13 +14,14 @@ const fastify = Fastify({
 
 // Healthcheck endpoint
 fastify.get('/health', async () => {
+  const keysCount = getAllApiKeys().length;
   return {
     status: 'ok',
     service: 'AppIngles Live Audio Gateway (Cláudia)',
     model: CONFIG.geminiLiveModel,
     audioConfig: CONFIG.audio,
-    apiKeyConfigured:
-      Boolean(CONFIG.geminiApiKey) && CONFIG.geminiApiKey !== 'coloque_sua_chave_aqui',
+    apiKeyConfigured: keysCount > 0,
+    apiKeysCount: keysCount,
   };
 });
 

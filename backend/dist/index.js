@@ -15,12 +15,14 @@ const fastify = (0, fastify_1.default)({
 });
 // Healthcheck endpoint
 fastify.get('/health', async () => {
+    const keysCount = (0, config_js_1.getAllApiKeys)().length;
     return {
         status: 'ok',
         service: 'AppIngles Live Audio Gateway (Cláudia)',
         model: config_js_1.CONFIG.geminiLiveModel,
         audioConfig: config_js_1.CONFIG.audio,
-        apiKeyConfigured: Boolean(config_js_1.CONFIG.geminiApiKey) && config_js_1.CONFIG.geminiApiKey !== 'coloque_sua_chave_aqui',
+        apiKeyConfigured: keysCount > 0,
+        apiKeysCount: keysCount,
     };
 });
 // Rota para baixar o APK compilado diretamente pelo navegador do celular

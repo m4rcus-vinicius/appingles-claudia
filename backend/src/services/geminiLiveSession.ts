@@ -1,5 +1,11 @@
 import WebSocket from 'ws';
-import { CONFIG } from '../config.js';
+import {
+  acquireLeastLoadedApiKey,
+  CONFIG,
+  getAllApiKeys,
+  getNextFallbackApiKey,
+  releaseApiKey,
+} from '../config.js';
 import {
   buildTutorSystemInstruction,
   HumorIntensity,
@@ -33,6 +39,7 @@ const SILENT_100MS_PCM_16K_BASE64 = Buffer.alloc(3200, 0).toString('base64');
 /**
  * Gerencia uma sessão WebSocket bidirecional com a Gemini Multimodal Live API
  * (BidiGenerateContent):
+ * - Distribui automaticamente múltiplos usuários simultâneos entre o pool de chaves GEMINI_API_KEY.
  * - Consolida os pacotes de áudio de cada fala da Cláudia em um único bloco contínuo
  *   para garantir que frases longas NUNCA sejam cortadas na metade no celular.
  * - Bloqueia eco acústico no servidor durante a geração e reprodução da fala da Cláudia,
@@ -45,6 +52,7 @@ export class GeminiLiveSession {
   private hasSentInitialGreeting = false;
   private intensity: HumorIntensity;
   private callbacks: GeminiLiveCallbacks;
+  private sessionApiKey = '';
 
   // Buffer de consolidação de áudio do turno atual da Cláudia
   private currentTurnPcmBuffers: Buffer[] = [];
@@ -60,8 +68,15 @@ export class GeminiLiveSession {
     this.callbacks = callbacks;
   }
 
-  public connect(): void {
-    if (!CONFIG.geminiApiKey || CONFIG.geminiApiKey === 'coloque_sua_chave_aqui') {
+  public connect(rotateKey = false): void {
+    if (!this.sessionApiKey) {
+      this.sessionApiKey = acquireLeastLoadedApiKey();
+    } else if (rotateKey) {
+      releaseApiKey(this.sessionApiKey);
+      this.sessionApiKey = getNextFallbackApiKey(this.sessionApiKey);
+    }
+
+    if (!this.sessionApiKey) {
       this.callbacks.onError(
         'GEMINI_API_KEY não configurada no servidor backend (.env). Configure sua chave do Google AI Studio.'
       );
@@ -69,7 +84,7 @@ export class GeminiLiveSession {
     }
 
     this.isClosedByClient = false;
-    const url = `${CONFIG.geminiWsEndpoint}?key=${encodeURIComponent(CONFIG.geminiApiKey)}`;
+    const url = `${CONFIG.geminiWsEndpoint}?key=${encodeURIComponent(this.sessionApiKey)}`;
     this.geminiWs = new WebSocket(url);
 
     this.geminiWs.on('open', () => {
@@ -94,10 +109,12 @@ export class GeminiLiveSession {
       this.isGeneratingModelTurn = false;
 
       if (!this.isClosedByClient) {
-        console.log('[GeminiLiveSession] Reconectando automaticamente ao Gemini Live em 600ms...');
+        console.log(
+          '[GeminiLiveSession] Reconectando automaticamente ao Gemini Live em 600ms (rotacionando chave se houver pool)...'
+        );
         setTimeout(() => {
           if (!this.isClosedByClient) {
-            this.connect();
+            this.connect(true);
           }
         }, 600);
         return;
@@ -337,9 +354,11 @@ export class GeminiLiveSession {
    */
   private async extractCorrectionIfAny(userSaid: string, tutorSaid: string): Promise<void> {
     try {
-      let parsed = await this.extractViaLiveWs(userSaid, tutorSaid);
+      // Usa primeiro o pool de 8 modelos REST (0 consumo de WebSockets simultâneos e ~0.9s de resposta);
+      // se a cota diária REST de todas as chaves acabar, usa o extrator Live WebSocket ilimitado!
+      let parsed = await this.extractViaRestPool(userSaid, tutorSaid);
       if (!parsed) {
-        parsed = await this.extractViaRestPool(userSaid, tutorSaid);
+        parsed = await this.extractViaLiveWs(userSaid, tutorSaid);
       }
 
       if (parsed?.hasCorrection && (parsed.correction || parsed.explanationPt)) {
@@ -368,11 +387,12 @@ export class GeminiLiveSession {
   }
 
   /**
-   * Extrator primário via Gemini Multimodal Live WebSocket (sem limite de 20 req/dia no Free Tier)
+   * Extrator via Gemini Multimodal Live WebSocket (sem limite de 20 req/dia no Free Tier)
    */
   private extractViaLiveWs(userSaid: string, tutorSaid: string): Promise<any | null> {
     return new Promise((resolve) => {
-      const url = `${CONFIG.geminiWsEndpoint}?key=${encodeURIComponent(CONFIG.geminiApiKey)}`;
+      const extractorKey = getNextFallbackApiKey(this.sessionApiKey) || this.sessionApiKey || CONFIG.geminiApiKey;
+      const url = `${CONFIG.geminiWsEndpoint}?key=${encodeURIComponent(extractorKey)}`;
       const ws = new WebSocket(url);
       let resolved = false;
 
@@ -507,7 +527,8 @@ export class GeminiLiveSession {
   }
 
   /**
-   * Pool secundário de fallback REST (rotaciona entre 8 modelos Flash independentes caso necessário)
+   * Pool de 8 modelos Flash REST combinado com todas as chaves configuradas no pool
+   * (zero conexões WebSocket extras, garantindo máxima capacidade para múltiplos usuários simultâneos)
    */
   private async extractViaRestPool(userSaid: string, tutorSaid: string): Promise<any | null> {
     const fallbackModels = [
@@ -524,47 +545,52 @@ export class GeminiLiveSession {
     const promptText = `Analise a fala abaixo da tutora de inglês Cláudia (que conversa em inglês, mas muda para o português quando o aluno comete algum erro).
 ${userSaid ? `Transcrição do aluno: "${userSaid}"\n` : ''}Transcrição da resposta da Cláudia: "${tutorSaid}"
 
-Verifique se nessa fala a Cláudia corrigiu algum erro gramatical, vocabulário, tradução literal, pronúncia ou deu bronca em português ensinando como falar em inglês.
+Verifique se nessa fala a Cláudia corrigiu algum erro gramatical, vocabulário, tradução literal, pronúncia ou deu bronca em português ensinando como falar em inglês. (Se ela apenas comemorou que o aluno repetiu certo, marque hasCorrection: false).
 Retorne APENAS um objeto JSON válido com: hasCorrection (boolean), userSaid (string), correction (string), explanationPt (string), category ("grammar" | "vocabulary" | "pronunciation" | "naturalness").`;
 
-    for (const modelCfg of fallbackModels) {
-      try {
-        const generationConfig: Record<string, unknown> = {
-          responseMimeType: 'application/json',
-          temperature: 0.1,
-        };
-        if (modelCfg.disableThinking) {
-          generationConfig.thinkingConfig = { thinkingBudget: 0 };
-        }
+    const allKeys = getAllApiKeys();
+    const keysToTry = allKeys.length > 0 ? allKeys : [CONFIG.geminiApiKey];
 
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${modelCfg.name}:generateContent?key=${encodeURIComponent(
-            CONFIG.geminiApiKey
-          )}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              safetySettings: UNFILTERED_SAFETY_SETTINGS,
-              contents: [{ role: 'user', parts: [{ text: promptText }] }],
-              generationConfig,
-            }),
+    for (const apiKey of keysToTry) {
+      for (const modelCfg of fallbackModels) {
+        try {
+          const generationConfig: Record<string, unknown> = {
+            responseMimeType: 'application/json',
+            temperature: 0.1,
+          };
+          if (modelCfg.disableThinking) {
+            generationConfig.thinkingConfig = { thinkingBudget: 0 };
           }
-        );
 
-        if (!res.ok) continue;
-        const data = (await res.json()) as any;
-        const parts = data?.candidates?.[0]?.content?.parts || [];
-        const textPart = parts.find((p: any) => p.text && !p.thought) || parts[0];
-        if (!textPart?.text) continue;
+          const res = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${modelCfg.name}:generateContent?key=${encodeURIComponent(
+              apiKey
+            )}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                safetySettings: UNFILTERED_SAFETY_SETTINGS,
+                contents: [{ role: 'user', parts: [{ text: promptText }] }],
+                generationConfig,
+              }),
+            }
+          );
 
-        const cleaned = String(textPart.text)
-          .replace(/^```json\s*/i, '')
-          .replace(/```\s*$/i, '')
-          .trim();
-        return JSON.parse(cleaned);
-      } catch {
-        continue;
+          if (!res.ok) continue;
+          const data = (await res.json()) as any;
+          const parts = data?.candidates?.[0]?.content?.parts || [];
+          const textPart = parts.find((p: any) => p.text && !p.thought) || parts[0];
+          if (!textPart?.text) continue;
+
+          const cleaned = String(textPart.text)
+            .replace(/^```json\s*/i, '')
+            .replace(/```\s*$/i, '')
+            .trim();
+          return JSON.parse(cleaned);
+        } catch {
+          continue;
+        }
       }
     }
 
@@ -579,6 +605,10 @@ Retorne APENAS um objeto JSON válido com: hasCorrection (boolean), userSaid (st
 
   public close(): void {
     this.isClosedByClient = true;
+    if (this.sessionApiKey) {
+      releaseApiKey(this.sessionApiKey);
+      this.sessionApiKey = '';
+    }
     if (this.geminiWs) {
       this.geminiWs.removeAllListeners();
       if (this.geminiWs.readyState === WebSocket.OPEN) {
