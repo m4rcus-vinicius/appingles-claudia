@@ -25,16 +25,18 @@ fastify.get('/health', async () => {
   };
 });
 
-// Rota para baixar o APK compilado diretamente pelo navegador do celular
+// Rota para baixar o APK compilado diretamente pelo navegador do celular (local ou na nuvem 24h)
 fastify.get('/download-apk', async (_req, reply) => {
   const apkPath = path.resolve(
     process.cwd(),
     '../mobile/android/app/build/outputs/apk/release/app-release.apk'
   );
   if (!fs.existsSync(apkPath)) {
-    return reply.status(404).send({
-      error: 'O arquivo APK ainda está sendo compilado. Aguarde a conclusão do build.',
-    });
+    // Na nuvem (Render), redireciona diretamente para o instalador oficial hospedado no GitHub Releases (24h online)
+    return reply.redirect(
+      302,
+      'https://github.com/m4rcus-vinicius/appingles-claudia/releases/latest/download/Claudia-Ingles-Sem-Filtro.apk'
+    );
   }
   reply.header('Content-Type', 'application/vnd.android.package-archive');
   reply.header('Content-Disposition', 'attachment; filename="Claudia-Ingles-Sem-Filtro.apk"');
