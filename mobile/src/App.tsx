@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { CorrectionCard } from './components/CorrectionCard';
 import { IntensitySelector } from './components/IntensitySelector';
+import { UpdateModal } from './components/UpdateModal';
 import { VoiceOrb } from './components/VoiceOrb';
 import { AudioStreamService } from './services/audioStreamService';
 import { TutorSocketClient } from './services/tutorSocketClient';
@@ -22,6 +23,12 @@ import {
   HumorIntensity,
   SessionStatus,
 } from './types/tutor';
+import {
+  AppReleaseInfo,
+  checkAppUpdate,
+  CURRENT_APP_VERSION,
+  isNewerVersion,
+} from './config/version';
 
 // Exemplo inicial no painel para demonstrar a dinâmica logo ao abrir o app
 const INITIAL_DEMO_CORRECTIONS: GrammarCorrection[] = [
@@ -49,6 +56,25 @@ export default function App() {
     'wss://claudia-ingles-backend.onrender.com/ws/tutor'
   );
   const [lastBargeInTime, setLastBargeInTime] = useState<string | null>(null);
+
+  // Estados de Atualização Automática do Aplicativo
+  const [updateInfo, setUpdateInfo] = useState<AppReleaseInfo | null>(null);
+  const [updateModalVisible, setUpdateModalVisible] = useState<boolean>(false);
+  const [checkingUpdateManually, setCheckingUpdateManually] = useState<boolean>(false);
+
+  useEffect(() => {
+    // Checa silenciosamente por atualizações na inicialização do aplicativo
+    const timer = setTimeout(() => {
+      checkAppUpdate(backendWsUrl).then((info) => {
+        if (info && isNewerVersion(info.version, CURRENT_APP_VERSION)) {
+          setUpdateInfo(info);
+          setUpdateModalVisible(true);
+        }
+      });
+    }, 1500);
+
+    return () => clearTimeout(timer);
+  }, [backendWsUrl]);
 
   const socketRef = useRef<TutorSocketClient | null>(null);
   const audioRef = useRef<AudioStreamService | null>(null);
@@ -283,6 +309,36 @@ export default function App() {
               onChange={handleChangeIntensity}
             />
 
+            {/* Seção de Atualização de Versão */}
+            <View style={styles.appVersionSection}>
+              <Text style={styles.inputLabel}>Versão Instalada:</Text>
+              <View style={styles.versionRow}>
+                <Text style={styles.versionValueText}>v{CURRENT_APP_VERSION}</Text>
+                <TouchableOpacity
+                  activeOpacity={0.75}
+                  style={styles.checkUpdateButton}
+                  onPress={async () => {
+                    setCheckingUpdateManually(true);
+                    const info = await checkAppUpdate(backendWsUrl);
+                    setCheckingUpdateManually(false);
+                    if (info && isNewerVersion(info.version, CURRENT_APP_VERSION)) {
+                      setUpdateInfo(info);
+                      setUpdateModalVisible(true);
+                    } else {
+                      Alert.alert(
+                        'Tudo atualizado! ✨',
+                        `Você já está utilizando a versão mais recente da Cláudia (v${CURRENT_APP_VERSION}).`
+                      );
+                    }
+                  }}
+                >
+                  <Text style={styles.checkUpdateButtonText}>
+                    {checkingUpdateManually ? 'Verificando...' : '🔄 Checar Atualização'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
             <TouchableOpacity
               style={styles.closeModalButton}
               onPress={() => setSettingsVisible(false)}
@@ -292,6 +348,13 @@ export default function App() {
           </View>
         </View>
       </Modal>
+
+      {/* Modal Automático de Atualização com 1 Toque */}
+      <UpdateModal
+        visible={updateModalVisible}
+        releaseInfo={updateInfo}
+        onDismiss={() => setUpdateModalVisible(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -487,5 +550,34 @@ const styles = StyleSheet.create({
     color: '#0F172A',
     fontWeight: '800',
     fontSize: 14,
+  },
+  appVersionSection: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#1E293B',
+  },
+  versionRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  versionValueText: {
+    color: '#34D399',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  checkUpdateButton: {
+    backgroundColor: '#1E293B',
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#38BDF8',
+  },
+  checkUpdateButtonText: {
+    color: '#38BDF8',
+    fontSize: 12,
+    fontWeight: '700',
   },
 });

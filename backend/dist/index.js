@@ -36,6 +36,50 @@ fastify.get('/download-apk', async (_req, reply) => {
     reply.header('Content-Disposition', 'attachment; filename="Claudia-Ingles-Sem-Filtro.apk"');
     return reply.send(fs_1.default.createReadStream(apkPath));
 });
+// Cache para checagem automática de atualizações do aplicativo móvel
+let cachedReleaseInfo = null;
+let lastReleaseFetchTime = 0;
+fastify.get('/api/app-version', async () => {
+    const now = Date.now();
+    if (cachedReleaseInfo && now - lastReleaseFetchTime < 5 * 60 * 1000) {
+        return cachedReleaseInfo;
+    }
+    try {
+        const res = await fetch('https://api.github.com/repos/m4rcus-vinicius/appingles-claudia/releases/latest', {
+            headers: {
+                Accept: 'application/vnd.github+json',
+                'User-Agent': 'AppIngles-Version-Checker',
+            },
+        });
+        if (res.ok) {
+            const data = (await res.json());
+            const tag = String(data.tag_name || '').replace(/^v/i, '');
+            const asset = (data.assets || []).find((a) => String(a.name).endsWith('.apk'));
+            const downloadUrl = asset?.browser_download_url ||
+                'https://github.com/m4rcus-vinicius/appingles-claudia/releases/latest/download/Claudia-Ingles-Sem-Filtro.apk';
+            cachedReleaseInfo = {
+                version: tag || '1.3.0',
+                name: data.name || `Versão ${tag}`,
+                notes: data.body ||
+                    'Novidades e melhorias de desempenho no Cláudia - Inglês Sem Filtro.',
+                downloadUrl,
+                publishedAt: data.published_at || new Date().toISOString(),
+            };
+            lastReleaseFetchTime = now;
+            return cachedReleaseInfo;
+        }
+    }
+    catch (err) {
+        fastify.log.warn(`Erro ao consultar GitHub Releases: ${err}`);
+    }
+    return {
+        version: '1.3.0',
+        name: 'Cláudia v1.3.0 (Modo Iniciante)',
+        notes: 'Nova modalidade Iniciante (zero broncas e muito acolhedora).',
+        downloadUrl: 'https://github.com/m4rcus-vinicius/appingles-claudia/releases/latest/download/Claudia-Ingles-Sem-Filtro.apk',
+        publishedAt: new Date().toISOString(),
+    };
+});
 /**
  * Endpoint WebSocket principal (/ws/tutor)
  * Conecta o App Mobile (React Native) ao Gemini Multimodal Live API sem expor a API Key no cliente.
