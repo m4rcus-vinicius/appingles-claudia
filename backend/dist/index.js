@@ -70,7 +70,11 @@ const registerRoutes = async () => {
     await fastify.register(async function (app) {
         app.get('/ws/tutor', { websocket: true }, (socket, req) => {
             const query = req.query;
-            const initialIntensity = query?.intensity === 'moderado' ? 'moderado' : 'roast';
+            const initialIntensity = query?.intensity === 'iniciante'
+                ? 'iniciante'
+                : query?.intensity === 'moderado'
+                    ? 'moderado'
+                    : 'roast';
             app.log.info(`[Gateway] Novo cliente mobile conectado (intensity=${initialIntensity})`);
             const sendToClient = (payload) => {
                 if (socket.readyState === socket.OPEN) {
@@ -153,7 +157,9 @@ const registerRoutes = async () => {
                             }
                             break;
                         case 'set_intensity':
-                            if (msg.intensity === 'moderado' || msg.intensity === 'roast') {
+                            if (msg.intensity === 'iniciante' ||
+                                msg.intensity === 'moderado' ||
+                                msg.intensity === 'roast') {
                                 geminiSession.updateIntensity(msg.intensity);
                             }
                             break;

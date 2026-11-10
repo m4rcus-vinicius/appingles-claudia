@@ -80,7 +80,11 @@ const registerRoutes = async () => {
     app.get('/ws/tutor', { websocket: true }, (socket: WebSocket, req) => {
       const query = req.query as { intensity?: string };
       const initialIntensity: HumorIntensity =
-        query?.intensity === 'moderado' ? 'moderado' : 'roast';
+        query?.intensity === 'iniciante'
+          ? 'iniciante'
+          : query?.intensity === 'moderado'
+          ? 'moderado'
+          : 'roast';
 
       app.log.info(
         `[Gateway] Novo cliente mobile conectado (intensity=${initialIntensity})`
@@ -173,7 +177,11 @@ const registerRoutes = async () => {
               break;
 
             case 'set_intensity':
-              if (msg.intensity === 'moderado' || msg.intensity === 'roast') {
+              if (
+                msg.intensity === 'iniciante' ||
+                msg.intensity === 'moderado' ||
+                msg.intensity === 'roast'
+              ) {
                 geminiSession.updateIntensity(msg.intensity);
               }
               break;

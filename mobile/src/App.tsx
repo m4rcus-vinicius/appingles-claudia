@@ -162,7 +162,9 @@ export default function App() {
         <View style={styles.headerTextContainer}>
           <Text style={styles.appTitle}>CLÁUDIA • INGLÊS SEM FILTRO</Text>
           <Text style={styles.appSubtitle}>
-            Conversa em Inglês 🇺🇸 • Broncas em Português 🇧🇷
+            {intensity === 'iniciante'
+              ? 'Aprenda do Zero • Paciente e Acolhedor 🌱'
+              : 'Conversa em Inglês 🇺🇸 • Broncas em Português 🇧🇷'}
           </Text>
         </View>
         <TouchableOpacity
@@ -239,8 +241,9 @@ export default function App() {
           ListEmptyComponent={
             <View style={styles.emptyBox}>
               <Text style={styles.emptyText}>
-                Nenhuma canelada registrada ainda. Comece a falar em inglês que a
-                Cláudia já encontra motivo pra te zoar!
+                {intensity === 'iniciante'
+                  ? 'Nenhuma anotação ainda. Pode começar falando com a Cláudia em português ou inglês que ela te ajuda!'
+                  : 'Nenhuma canelada registrada ainda. Comece a falar em inglês que a Cláudia já encontra motivo pra te zoar!'}
               </Text>
             </View>
           }

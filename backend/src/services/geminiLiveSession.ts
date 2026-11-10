@@ -175,6 +175,11 @@ export class GeminiLiveSession {
     this.hasSentInitialGreeting = true;
     this.isGeneratingModelTurn = true;
 
+    const greetingText =
+      this.intensity === 'iniciante'
+        ? '[SYSTEM: O aluno acabou de abrir o microfone no MODO INICIANTE. Cumprimente-o com muito carinho, paciência e simpatia. Fale em português acolhedor e um inglês bem básico (ex: "Hi! Welcome! Eu sou a Cláudia e estou aqui para te ajudar a falar inglês do zero! Pode falar com calma, até em português se quiser! How are you today? Como você está hoje?").]'
+        : '[SYSTEM: O aluno acabou de abrir o microfone. Comece a conversa em inglês com energia, se apresentando rapidamente como Cláudia e fazendo uma pergunta curta e direta sobre o dia dele para testar o inglês dele.]';
+
     const greetingPrompt = {
       clientContent: {
         turns: [
@@ -182,7 +187,7 @@ export class GeminiLiveSession {
             role: 'user',
             parts: [
               {
-                text: '[SYSTEM: O aluno acabou de abrir o microfone. Comece a conversa em inglês com energia, se apresentando rapidamente como Cláudia e fazendo uma pergunta curta e direta sobre o dia dele para testar o inglês dele.]',
+                text: greetingText,
               },
             ],
           },
@@ -234,11 +239,23 @@ export class GeminiLiveSession {
   }
 
   /**
-   * Atualiza dinamicamente o modo de intensidade do humor (Moderado vs Roast) durante a sessão
+   * Atualiza dinamicamente o modo de intensidade do humor (Iniciante vs Moderado vs Roast) durante a sessão
    */
   public updateIntensity(newIntensity: HumorIntensity): void {
     this.intensity = newIntensity;
     if (!this.isSetupComplete) return;
+
+    let updateText = '';
+    if (newIntensity === 'roast') {
+      updateText =
+        '[SYSTEM UPDATE: O usuário mudou a configuração para MODO SEM FILTRO / ROAST. Aumente o nível de deboche, sarcasmo e palavrões coloquiais em português nas próximas correções!]';
+    } else if (newIntensity === 'moderado') {
+      updateText =
+        '[SYSTEM UPDATE: O usuário mudou a configuração para MODO MODERADO. Mantenha o tom irônico e divertido nas correções em português, mas reduza os palavrões pesados.]';
+    } else {
+      updateText =
+        '[SYSTEM UPDATE: O usuário mudou a configuração para MODO INICIANTE. A partir de agora, seja extremamente paciente, acolhedora e encorajadora. ZERAR qualquer deboche, palavrão ou bronca. Se o aluno falar em português ou travar, ajude com carinho a passar para o inglês básico e mande ele repetir com carinho!]';
+    }
 
     const modeNotification = {
       clientContent: {
@@ -247,10 +264,7 @@ export class GeminiLiveSession {
             role: 'user',
             parts: [
               {
-                text:
-                  newIntensity === 'roast'
-                    ? '[SYSTEM UPDATE: O usuário mudou a configuração para MODO SEM FILTRO / ROAST. Aumente o nível de deboche, sarcasmo e palavrões coloquiais em português nas próximas correções!]'
-                    : '[SYSTEM UPDATE: O usuário mudou a configuração para MODO MODERADO. Mantenha o tom irônico e divertido nas correções em português, mas reduza os palavrões pesados.]',
+                text: updateText,
               },
             ],
           },
@@ -439,12 +453,12 @@ export class GeminiLiveSession {
                           hasCorrection: {
                             type: 'BOOLEAN',
                             description:
-                              'true se a Cláudia corrigiu um erro, deu bronca explicando como falar certo em inglês ou mandou o aluno repetir uma frase corrigida. false se ela apenas conversou em inglês ou se ela apenas elogiou/comemorou que o aluno repetiu a frase corretamente.',
+                              'true se a Cláudia corrigiu um erro, ensinou como dizer algo em inglês, deu dica/bronca ou pediu para o aluno repetir uma frase correta em inglês. false se ela apenas conversou normalmente em inglês ou apenas elogiou/comemorou que o aluno repetiu a frase corretamente.',
                           },
                           userSaid: {
                             type: 'STRING',
                             description:
-                              'A frase ou palavra errada (ou em português) que o aluno disse. Extraia da fala do aluno ou da citação feita pela Cláudia.',
+                              'A frase ou palavra dita pelo aluno (com erro ou em português). Extraia da fala do aluno ou da citação feita pela Cláudia.',
                           },
                           correction: {
                             type: 'STRING',
@@ -454,7 +468,7 @@ export class GeminiLiveSession {
                           explanationPt: {
                             type: 'STRING',
                             description:
-                              'A bronca e explicação em português que a Cláudia deu para o aluno.',
+                              'A explicação, dica carinhosa ou bronca em português que a Cláudia deu para o aluno.',
                           },
                           category: {
                             type: 'STRING',
@@ -542,10 +556,10 @@ export class GeminiLiveSession {
       { name: 'gemini-3.8-flash', disableThinking: true },
     ];
 
-    const promptText = `Analise a fala abaixo da tutora de inglês Cláudia (que conversa em inglês, mas muda para o português quando o aluno comete algum erro).
+    const promptText = `Analise a fala abaixo da tutora de inglês Cláudia (que conversa em inglês, mas muda para o português quando corrige ou ensina o aluno).
 ${userSaid ? `Transcrição do aluno: "${userSaid}"\n` : ''}Transcrição da resposta da Cláudia: "${tutorSaid}"
 
-Verifique se nessa fala a Cláudia corrigiu algum erro gramatical, vocabulário, tradução literal, pronúncia ou deu bronca em português ensinando como falar em inglês. (Se ela apenas comemorou que o aluno repetiu certo, marque hasCorrection: false).
+Verifique se nessa fala a Cláudia corrigiu algum erro gramatical, vocabulário, tradução literal, pronúncia ou ensinou em português como dizer algo em inglês pedindo para repetir. (Se ela apenas comemorou que o aluno repetiu certo ou conversou normalmente em inglês, marque hasCorrection: false).
 Retorne APENAS um objeto JSON válido com: hasCorrection (boolean), userSaid (string), correction (string), explanationPt (string), category ("grammar" | "vocabulary" | "pronunciation" | "naturalness").`;
 
     const allKeys = getAllApiKeys();

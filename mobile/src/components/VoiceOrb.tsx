@@ -8,41 +8,63 @@ interface VoiceOrbProps {
   intensity: HumorIntensity;
 }
 
-const STATUS_META: Record<
-  SessionStatus,
-  { label: string; subtitle: string; color: string; glowColor: string }
-> = {
-  disconnected: {
-    label: 'OFFLINE',
-    subtitle: 'Toque em Iniciar Sessão para falar com a Cláudia',
-    color: '#475569',
-    glowColor: 'rgba(71, 85, 105, 0.25)',
-  },
-  connecting: {
-    label: 'CONECTANDO...',
-    subtitle: 'Abrindo canal de áudio bidirecional com a Cláudia',
-    color: '#38BDF8',
-    glowColor: 'rgba(56, 189, 248, 0.35)',
-  },
-  listening: {
-    label: 'OUVINDO VOCÊ (EN)',
-    subtitle: 'Fale em inglês! Se errar, prepara o ouvido...',
-    color: '#10B981',
-    glowColor: 'rgba(16, 185, 129, 0.40)',
-  },
-  thinking: {
-    label: 'PROCESSANDO...',
-    subtitle: 'Cláudia está julgando o seu inglês...',
-    color: '#F59E0B',
-    glowColor: 'rgba(245, 158, 11, 0.40)',
-  },
-  speaking: {
-    label: 'CLÁUDIA FALANDO',
-    subtitle: 'Ouça a resposta ou toque em "Cortar Fala" para interromper',
-    color: '#EF4444',
-    glowColor: 'rgba(239, 68, 68, 0.45)',
-  },
-};
+interface StatusMetaItem {
+  label: string;
+  subtitle: string;
+  color: string;
+  glowColor: string;
+}
+
+function getStatusMeta(status: SessionStatus, intensity: HumorIntensity): StatusMetaItem {
+  switch (status) {
+    case 'disconnected':
+      return {
+        label: 'OFFLINE',
+        subtitle: 'Toque em Iniciar Sessão para falar com a Cláudia',
+        color: '#475569',
+        glowColor: 'rgba(71, 85, 105, 0.25)',
+      };
+    case 'connecting':
+      return {
+        label: 'CONECTANDO...',
+        subtitle: 'Abrindo canal de áudio bidirecional com a Cláudia',
+        color: '#38BDF8',
+        glowColor: 'rgba(56, 189, 248, 0.35)',
+      };
+    case 'listening':
+      return {
+        label: intensity === 'iniciante' ? 'OUVINDO VOCÊ (PT/EN)' : 'OUVINDO VOCÊ (EN)',
+        subtitle:
+          intensity === 'iniciante'
+            ? 'Pode falar com calma, até em português se precisar!'
+            : intensity === 'moderado'
+            ? 'Fale em inglês! Se errar, ela vai te zoar...'
+            : 'Fale em inglês! Se errar, prepara o ouvido...',
+        color: '#10B981',
+        glowColor: 'rgba(16, 185, 129, 0.40)',
+      };
+    case 'thinking':
+      return {
+        label: 'PROCESSANDO...',
+        subtitle:
+          intensity === 'iniciante'
+            ? 'Cláudia está preparando a dica pra você...'
+            : 'Cláudia está julgando o seu inglês...',
+        color: '#F59E0B',
+        glowColor: 'rgba(245, 158, 11, 0.40)',
+      };
+    case 'speaking':
+      return {
+        label: 'CLÁUDIA FALANDO',
+        subtitle: 'Ouça a resposta ou toque em "Cortar Fala" para interromper',
+        color: intensity === 'iniciante' ? '#10B981' : '#EF4444',
+        glowColor:
+          intensity === 'iniciante'
+            ? 'rgba(16, 185, 129, 0.45)'
+            : 'rgba(239, 68, 68, 0.45)',
+      };
+  }
+}
 
 export const VoiceOrb: React.FC<VoiceOrbProps> = ({
   status,
@@ -104,7 +126,7 @@ export const VoiceOrb: React.FC<VoiceOrbProps> = ({
     return () => loop.stop();
   }, [status, pulseAnim, outerRingAnim]);
 
-  const meta = STATUS_META[status];
+  const meta = getStatusMeta(status, intensity);
   const dynamicMicBoost = status === 'listening' ? 1 + micLevel * 0.35 : 1;
 
   return (
@@ -141,11 +163,15 @@ export const VoiceOrb: React.FC<VoiceOrbProps> = ({
             {status === 'speaking'
               ? intensity === 'roast'
                 ? '🤬'
-                : '😏'
+                : intensity === 'moderado'
+                ? '😏'
+                : '😊'
               : status === 'listening'
               ? '🎙️'
               : status === 'thinking'
-              ? '🤨'
+              ? intensity === 'iniciante'
+                ? '🤔'
+                : '🤨'
               : '🎧'}
           </Text>
         </Animated.View>

@@ -5,7 +5,7 @@ export type SessionStatus =
   | 'thinking'
   | 'speaking';
 
-export type HumorIntensity = 'moderado' | 'roast';
+export type HumorIntensity = 'iniciante' | 'moderado' | 'roast';
 
 export type CorrectionCategory =
   | 'grammar'
